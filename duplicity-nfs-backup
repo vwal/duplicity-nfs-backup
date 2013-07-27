@@ -1,0 +1,250 @@
+#!/usr/bin/env bash
+
+# Distributed under MIT license 
+# Copyright (c) 2013 Ville Walveranta 
+# http://my.galagzee.com
+
+# Absolute path to the configuration file (if empty or not defined, 
+# the default is 'nfs_automount.conf' in the script's directory)
+#CONFIG_FILE=/etc/duplicity-nfs-backup.conf
+
+###############################################################################
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/sbin:/usr/sbin:/usr/bin:/root/bin
+export PATH
+
+# -- DATESTAMP AT RUNTIME -- 
+
+DATESTAMP=`date --rfc-3339=seconds`
+
+
+# -- IMPORT CONFIGURATION --
+
+if [ -z ${CONFIG_FILE} ] ; then
+  SCRIPT_PATH="`dirname \"$0\"`"
+  SCRIPT_PATH="`( cd \"$SCRIPT_PATH\" && pwd )`"
+  CONFIG=${SCRIPT_PATH}/duplicity-nfs-backup.conf
+else
+  CONFIG=${CONFIG_FILE}
+fi
+
+if [ -f ${CONFIG} ] ; then
+  source ${CONFIG}
+else
+  logger -s "duplicity-nfs-backup [${DATESTAMP}]: [CRIT] Configuration file ('${CONFIG}') missing; cannot continue!"
+  exit 1
+fi
+
+counter=0
+declare -a BACKUPDATA
+for BACKUP in ${BACKUPS[@]}; do
+  BACKUPDATA[((counter++))]=${BACKUP}
+done
+if [ -z ${BACKUPDATA} ] ; then
+  logger -s "duplicity-nfs-backup [${DATESTAMP}]: [CRIT] No backup configuration data in the config file ('${CONFIG}'); cannot continue!"
+  exit 1
+fi
+
+
+# -- LOGGING --
+
+function log {
+
+  if [ ! -z "$1" ] ; then 
+    log_msg="$1"
+  else
+    log_msg="[WARN] Parameter missing (log)!"
+  fi
+
+  TAG=${log_msg:0:6}
+
+  if [ ${TAG} = "[CRIT]" ] || [ ${TAG} = "[NOTE]" ] ; then 
+    critical=true
+  else
+    critical=false
+  fi
+
+  if [ "${DEBUGLOG}" = "true" ] || [ "${critical}" = "true" ] ; then
+    message=`echo "duplicity-nfs-backup [${DATESTAMP}]: ${log_msg}"`
+    
+    if [ "${LOGTYPE}" = "log" ] && [ ! -z ${LOGFILEPATH} ]; then
+      if [ ! -f ${LOGFILEPATH} ] ; then
+      	 touch ${LOGFILEPATH} > /dev/null 2>&1
+         if [ -f ${LOGFILEPATH} ] ; then
+           echo ${message} >> ${LOGFILEPATH}
+         else
+           echo ${message}
+         fi
+      fi
+    else
+      echo ${message}
+    fi
+  fi
+
+  if [ ${TAG} = "[CRIT]" ] ; then
+    logger_msg=`echo "duplicity-nfs-backup: ${log_msg}"`
+    logger ${logger_msg}
+  fi
+}
+
+
+# -- CHECK AND VERIFY DUPLICITY-BACKUP COMMAND LOCATION --
+
+if [ -z ${DUPLICITY_BACKUP_COMMAND} ] ; then
+  CMD=`which duplicity-backup.sh`
+  if [ $? -eq 0 ] ; then
+    duplicitybackupcmd=${CMD}
+  else 
+    CMD=`which duplicity-backup`
+    if [ $? -eq 0 ] ; then
+      duplicitybackupcmd=${CMD}
+    else
+      log "[CRIT] duplicity-backup command not defined in configuration, and 'duplicity-backup(.sh)' not found on path. Cannot continue."
+      exit 1
+    fi    
+  fi 
+else 
+  if [ -f ${DUPLICITY_BACKUP_COMMAND} ] ; then
+    duplicitybackupcmd=${DUPLICITY_BACKUP_COMMAND}
+  else
+    log "[CRIT] Command '${DUPLICITY_BACKUP_COMMAND}' not found. Cannot continue."
+    exit 1
+  fi
+fi
+log "[INFO] Using duplicity-backup command at '${duplicitybackupcmd}'."
+
+
+# -- OPERATIONS --
+
+function get_backup_dataset {
+  if [ ! -z "$1" ] ; then 
+    _backupdataset="$1"
+  else
+    log "[CRIT] Parameter missing (get_backup_dataset); process aborted!"
+    exit 1
+  fi
+
+  if [ -z ${DELIMITER} ] ; then
+    DELIMITER="|"
+  fi
+  _RET=(`echo ${_backupdataset//$DELIMITER/ }`)
+}
+
+function check_dir {
+  if [ ! -z "$1" ] ; then 
+    _backupdir="$1"
+  else
+    log "[CRIT] Parameter missing (check_dir); process aborted!"
+    exit 1
+  fi
+
+  if [ ! -d "${_backupdir}" ] ; then
+    _RET=true
+  else
+    _RET=false
+  fi
+}
+
+function test_remotecheckfile {
+  if [ ! -z "$1" ] ; then 
+    _remotecheckfile="$1"
+  else
+    _remotecheckfile=""
+  fi
+
+  if [ "${_remotecheckfile}" != "" ] ; then
+    if [ -f ${_remotecheckfile} ] ; then
+      _RET=true
+    else
+      _RET=false
+    fi
+  else
+    _RET=true
+  fi
+}
+
+function test_rw {
+  if [ ! -z "$1" ] ; then 
+    _rw_testfile="$1"
+  else
+    _rw_testfile="duplicity-nfs-backup_rw_test.Kk6MC2CkHoinbSE3CYqv"
+  fi
+
+  touch ${_rw_testfile} > /dev/null 2>&1
+  if [ -f ${_rw_testfile} ] ; then
+    rm -f ${_rw_testfile}
+    _RET=true
+  else
+    _RET=false
+  fi
+}
+
+
+# -- LOGIC --
+
+log "[INFO] Backup preview started."
+
+backupscnt=${#BACKUPDATA[@]}
+for (( i=0; i<${backupscnt}; i++)); do
+
+  get_backup_dataset ${BACKUPDATA[$i]}
+
+  ((datasetno=${i} + 1))
+  
+  if [ ${#_RET[@]} -lt 2 ] ; then
+    log "[CRIT] Incomplete backup dataset ${datasetno} in '${CONFIG}'. Skipping!"
+    log "[NOTE] Check delimiter ('${DELIMITER}')!"
+    continue
+  fi
+
+  TARGETDIR=${_RET[0]}
+  DUPLICITYCONF=${_RET[1]}
+  REMOTECHECKFILE=${_RET[2]}
+
+  check_dir ${TARGETDIR}
+  if ! ${_RET} ; then
+    log "[INFO] Backup target directory '${TARGETDIR}' available."
+
+    if [ ! -z ${REMOTECHECKFILE} ] ; then
+      fqdn_remotecheckfile=${TARGETDIR}/${REMOTECHECKFILE}
+      test_remotecheckfile ${fqdn_remotecheckfile}
+      if ${_RET} ; then
+        log "[INFO] (dataset ${datasetno}) Remote test file '${REMOTECHECKFILE}' is accessible in the target directory '${TARGETDIR}'."
+      else
+        log "[CRIT] (dataset ${datasetno}) Remote test file '${REMOTECHECKFILE}' could not be accessed in the target directory '${TARGETDIR}'. Unable to proceed with duplicity-backup using configuration '${DUPLICITYCONF}'!"
+        continue
+      fi
+    else
+      log "[NOTE] (dataset ${datasetno}) Remote test file not defined. Skipping remote test file check for this dataset."
+    fi
+
+    # RO/RW PROCESSING  
+    if [ -z ${RW_TESTFILE} ] ; then
+      RW_TESTFILE="duplicity-nfs-backup_rw_testfile"
+    fi
+
+    fqdn_testfile="${TARGETDIR}"/"${RW_TESTFILE}"
+    test_rw ${fqdn_testfile}
+    if ${_RET} ; then
+      log "[INFO] (dataset ${datasetno}) Target directory '${TARGETDIR}' is writable."
+    else
+      log "[CRIT] (dataset ${datasetno}) Directory '${TARGETDIR}' is not writable. Unable to proceed with duplicity-backup using configuration '${DUPLICITYCONF}'!"
+      continue
+    fi
+  
+  else
+    #BAD DIR PROCESSING
+    log "[CRIT] (dataset ${datasetno}) Backup directory '${TARGETDIR}' is not available. Cannot proceed with duplicity-backup using configuration '${DUPLICITYCONF}'!"
+    continue
+  fi
+
+  if [ ! -z ${TEST} ] && [ "${TEST}" = "true" ] ; then
+  	log "[NOTE] TEST IN EFFECT! NOT BACKING UP WITH THE CONFIGURATION: '${DUPLICITYCONF}'!"
+  	log "[NOTE] backup-command: ${duplicitybackupcmd} --backup --config ${DUPLICITYCONF}"
+  else
+    log "[NOTE] (dataset ${datasetno}) Backup started with the configuration: '${DUPLICITYCONF}'."
+    ${duplicitybackupcmd} --backup --config ${DUPLICITYCONF}
+    log "[NOTE] (dataset ${datasetno}) Backup completed with the configuration: '${DUPLICITYCONF}'."
+  fi
+
+done
