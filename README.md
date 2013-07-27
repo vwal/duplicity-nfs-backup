@@ -10,7 +10,7 @@ The inspiration for this script came from another script, [nfs_automount](http:/
 
 Paraphrasing zertrin, I mention here:
 
-Please note: **duplicity-nfs-backup IS NOT duplicity, nor is it duplicity-backup!** It is only a wrapper script for duplicity-backup [also] written in bash!
+Please note: **duplicity-nfs-backup IS NEITHER duplicity, NOR is it duplicity-backup!** It is only a wrapper script for duplicity-backup [also] written in bash!
 
 This means that you will need to install and configure duplicity and duplicity-backup.sh before you can utilize duplicity-nfs-backup.
 
