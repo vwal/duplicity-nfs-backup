@@ -33,7 +33,7 @@ Installation
 
 **PRE-REQUISITES: duplicity and duplicity-backup are required, nfs_automount is recommended!**
 
-Clone duplicity-nfs-backup to the location of your choice (here '/opt/duplicity-nfs-backup'), assign the ownership of the file **nfs_automount** to the root, and set its permissions to 700.
+Clone duplicity-nfs-backup to the location of your choice (here '/opt/duplicity-nfs-backup'), assign the ownership of the file **duplicity-nfs-backup** to the root, and set its permissions to 700.
 
     sudo su
     cd /opt
