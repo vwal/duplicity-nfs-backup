@@ -64,6 +64,8 @@ function log {
     critical=false
   fi
 
+  DATESTAMP=`date --rfc-3339=seconds`
+
   if [ "${DEBUGLOG}" = "true" ] || [ "${critical}" = "true" ] ; then
     message=`echo "duplicity-nfs-backup [${DATESTAMP}]: ${log_msg}"`
     
