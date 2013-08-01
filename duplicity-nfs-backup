@@ -68,15 +68,19 @@ function log {
 
   if [ "${DEBUGLOG}" = "true" ] || [ "${critical}" = "true" ] ; then
     message=`echo "duplicity-nfs-backup [${DATESTAMP}]: ${log_msg}"`
-    
+
     if [ "${LOGTYPE}" = "log" ] && [ ! -z ${LOGFILEPATH} ]; then
+      _output_type=echo
       if [ ! -f ${LOGFILEPATH} ] ; then
       	 touch ${LOGFILEPATH} > /dev/null 2>&1
          if [ -f ${LOGFILEPATH} ] ; then
-           echo ${message} >> ${LOGFILEPATH}
-         else
-           echo ${message}
+           _output_type=log
          fi
+      fi
+      if [ "${_output_type}" = 'log' ] ; then
+        echo ${message} >> ${LOGFILEPATH}
+      else
+        echo ${message}
       fi
     else
       echo ${message}
@@ -181,6 +185,21 @@ function test_rw {
   fi
 }
 
+function check_duplicity_conf {
+  if [ ! -z "$1" ] ; then 
+    _duplicity_conf="$1"
+  else
+    log "[CRIT] Parameter missing (check_duplicity_conf); process aborted!"
+    exit 1
+  fi
+
+  if [ -f "$1" ] ; then 
+    _RET=true
+  else
+    _RET=false
+  fi
+}
+
 
 # -- LOGIC --
 
@@ -199,8 +218,8 @@ for (( i=0; i<${backupscnt}; i++)); do
     continue
   fi
 
-  TARGETDIR=${_RET[0]}
-  DUPLICITYCONF=${_RET[1]}
+  DUPLICITYCONF=${_RET[0]}
+  TARGETDIR=${_RET[1]}
   REMOTECHECKFILE=${_RET[2]}
 
   check_dir ${TARGETDIR}
@@ -240,13 +259,20 @@ for (( i=0; i<${backupscnt}; i++)); do
     continue
   fi
 
-  if [ ! -z ${TEST} ] && [ "${TEST}" = "true" ] ; then
-  	log "[NOTE] TEST IN EFFECT! NOT BACKING UP WITH THE CONFIGURATION: '${DUPLICITYCONF}'!"
-  	log "[NOTE] backup-command: ${duplicitybackupcmd} --backup --config ${DUPLICITYCONF}"
+  check_duplicity_conf ${DUPLICITYCONF}
+  if ${_RET} ; then
+    log "[INFO] (dataset ${datasetno}) duplicity-backup configuration file '${DUPLICITYCONF}' found. "
+    if [ ! -z ${TEST} ] && [ "${TEST}" = "true" ] ; then
+      log "[NOTE] TEST IN EFFECT! WOULD BACK UP WITH THE CONFIGURATION: '${DUPLICITYCONF}'!"
+  	  log "[NOTE] backup command: ${duplicitybackupcmd} --backup --config ${DUPLICITYCONF}"
+    else
+      log "[NOTE] (dataset ${datasetno}) Backup started with the configuration: '${DUPLICITYCONF}'."
+      ${duplicitybackupcmd} --backup --config ${DUPLICITYCONF}
+      log "[NOTE] (dataset ${datasetno}) Backup completed with the configuration: '${DUPLICITYCONF}'."
+    fi
   else
-    log "[NOTE] (dataset ${datasetno}) Backup started with the configuration: '${DUPLICITYCONF}'."
-    ${duplicitybackupcmd} --backup --config ${DUPLICITYCONF}
-    log "[NOTE] (dataset ${datasetno}) Backup completed with the configuration: '${DUPLICITYCONF}'."
+    log "[CRIT] (dataset ${datasetno}) duplicity-backup configuration file '${DUPLICITYCONF}' not found. Unable to proceed with backup set ${datasetno}!"
+    continue
   fi
 
 done
